@@ -1,0 +1,10 @@
+{
+"theme_color" : "#f69435"
+"background_color" : "#9013fe"
+"display" : "standalone"
+"scope" : "/"
+"start_url" : "/"
+"name" : "Colony"
+"short_name" : "CL"
+"description" : "The Future of Living"
+}

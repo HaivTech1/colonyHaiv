@@ -1,0 +1,219 @@
+import React, { useEffect, useState } from 'react'
+import { useRouter } from 'next/router'
+import useSWR from 'swr'
+import toast from 'react-hot-toast'
+import { useCookies } from 'react-cookie'
+import Cookie from 'js-cookie'
+import client from '../lib/client'
+
+
+export const useAuth = ({ middleware, redirectIfAuthenticated } = {}) => {
+    const router = useRouter()
+    
+    const [processing, setProcessing] = useState(false)
+    const [cookie, setCookie] = useCookies(['app_accessToken', 'user'])
+
+
+    const {
+        data: user,
+        error,
+        mutate,
+    } = useSWR('/auth/profile', () =>
+        client()
+            .get('/auth/profile')
+            .then(res => res.data)
+            .catch(error => {
+                if (error.response.status !== 409) throw error
+                router.push('/verify-email')
+                toast.error(error);
+            }),
+    )
+
+    const register = async ({ setErrors, setStatus, ...props }) => {
+        setProcessing(true)
+        setErrors([])
+        setStatus(null)
+        try {
+            client()
+                .post('/auth/register', props)
+                .then((response) => {
+                    console.log(response.data.user);
+                    setStatus(response.data.message)
+                    setCookie('user', response.data.user, {
+                        path: '/',
+                        maxAge: 1000,
+                        sameSite: true,
+                    });
+
+                    setInterval(() => {
+                        window.location.pathname = response.data.redirect
+                    }, 2000)
+                })
+                .catch(error => {
+                    if (error.status !== 422) throw error
+                    setErrors(Object.values(error.errorsRaw).flat())
+                })
+        } catch (e) {
+            console.log(e)
+            setProcessing(false)
+        }
+    }
+
+    const login = async ({ setErrors, setStatus, setTwoFA, setRespond, ...props }) => {
+        setProcessing(true)
+        setErrors([])
+        setStatus(null)
+        setTwoFA(false)
+        setRespond([])
+        try {
+            client()
+                .post('/auth/login', props)
+                .then((response) => {
+                        setStatus(response.data.message)
+                        setTwoFA(true)
+                        setRespond(response)
+                })
+                .catch(error => {
+                    if (error.status !== 422) throw error
+                    setErrors(Object.values(error.errorsRaw).flat())
+                })
+        } catch (e) {
+            console.log(e)
+            setProcessing(false)
+        }
+    }
+
+    const forgotPassword = async ({ setErrors, setStatus, email }) => {
+        let toastId
+        toastId = toast.loading('Redirecting...')
+        setProcessing(true)
+        await csrf()
+
+        setErrors([])
+        setStatus(null)
+        try {
+            client
+                .post('/forgot-password', { email })
+                .then(response => setStatus(response.data.status))
+                .catch(error => {
+                    if (error.response.status !== 422) throw error
+
+                    setErrors(Object.values(error.response.data.errors).flat())
+                    toast.error(
+                        Object.values(error.response.data.errors).flat(),
+                        {
+                            id: toastId,
+                        },
+                    )
+                })
+        } catch (e) {
+            console.log(e)
+            toast.error(Object.values(e.response.data.errors).flat(), {
+                id: toastId,
+            })
+            setProcessing(false)
+        }
+    }
+
+    const resetPassword = async ({ setErrors, setStatus, ...props }) => {
+        await csrf()
+
+        setErrors([])
+        setStatus(null)
+
+        client()
+            .post('/reset-password', { token: router.query.token, ...props })
+            .then(response =>
+                router.push('/auth/login?reset=' + btoa(response.data.status)),
+            )
+            .catch(error => {
+                if (error.response.status !== 422) throw error
+
+                setErrors(Object.values(error.response.data.errors).flat())
+            })
+    }
+
+    const resendEmailVerification = ({ setStatus }) => {
+        try{
+            client()
+                .post('/v1/email/verification-notification', {
+                    user: cookie.user._id
+                })
+                .then(response => setStatus(response.data.message))
+                .catch((error) => {
+                    if (error.status !== 422) throw error
+                    setErrors(Object.values(error.errorsRaw).flat())
+                })
+        }catch (e) {
+            console.log(e)
+        }
+    }
+
+    const changePassword = async ({setErrors, setStatus, ...props }) => {
+        setProcessing(true)
+        setErrors([])
+        setStatus(null)
+        try {
+            client()
+                .post('/auth/changePassword', props)
+                .then((response) => {
+                        setStatus(response.data.message)
+                })
+                .catch(error => {
+                    console.log(error)
+                    if (error.status !== 422) throw error
+                    setErrors(Object.values(error.errorsRaw).flat())
+                })
+        } catch (e) {
+            console.log(e)
+            setProcessing(false)
+        }
+    }
+
+    const changeDetails = async ({setErrors, setStatus, ...props }) => {
+        setProcessing(true)
+        setErrors([])
+        setStatus(null)
+        try {
+            client()
+                .post('/auth/changeDetails', props)
+                .then((response) => {
+                        setStatus(response.data.message)
+                }
+                )
+                .catch(error => {
+                    console.log(error.response.data.message)
+                    if (error.response.status !== 422) throw error
+                    setErrors(Object.values(error.response.data.message).flat())
+                })
+        } catch (e) {
+            console.log(e)
+            setProcessing(false)
+        }
+    }
+
+    const logout = async () => {
+        Cookie.remove('app_accessToken')
+        window.location.pathname = '/auth/login'
+    }
+
+    useEffect(() => {
+        if (middleware === 'guest' && redirectIfAuthenticated && user)
+            router.push(redirectIfAuthenticated)
+        if (middleware === 'auth' && error) logout()
+        if (middleware === 'verify' && error)  router.push(redirectIfAuthenticated)
+        
+    }, [user, error])
+
+    return {
+        user,
+        register,
+        login,
+        forgotPassword,
+        resetPassword,
+        resendEmailVerification,
+        changePassword,
+        changeDetails,
+        logout,
+    }
+}
